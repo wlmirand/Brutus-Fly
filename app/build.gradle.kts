@@ -49,10 +49,12 @@ android {
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
+            } else {
+                // Allow local release testing with R8 without publishing credentials.
+                signingConfig = signingConfigs.getByName("debug")
             }
             optimization {
                 enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
             }
         }
     }

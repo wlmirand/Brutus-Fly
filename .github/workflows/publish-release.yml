@@ -1,0 +1,141 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Run ID of a successful Signed release APK execution'
+        required: true
+        type: string
+      tag:
+        description: 'Release tag (for example, v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as a pre-release'
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate inputs
+        shell: bash
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo '::error::Run ID must be a positive integer'; exit 1; }
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+
+      - name: Validate source build and release tag
+        id: source
+        uses: actions/github-script@v7
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        with:
+          script: |
+            const repo = context.repo;
+            const runId = Number(process.env.RUN_ID);
+            if (!Number.isSafeInteger(runId)) throw new Error('Invalid Run ID');
+            const { data: workflow } = await github.rest.actions.getWorkflow({
+              ...repo, workflow_id: 'release-apk.yml',
+            });
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              ...repo, run_id: runId,
+            });
+            if (run.workflow_id !== workflow.id || run.event !== 'workflow_dispatch') {
+              throw new Error('The run must belong to the manual Signed release APK workflow');
+            }
+            if (run.status !== 'completed' || run.conclusion !== 'success') {
+              throw new Error('The source build must have completed successfully');
+            }
+            const name = `brutusfly-release-${run.run_number}`;
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              ...repo, run_id: runId, per_page: 100,
+            });
+            const matches = artifacts.filter(artifact => artifact.name === name && !artifact.expired);
+            if (matches.length !== 1) throw new Error('Expected exactly one unexpired signed APK artifact');
+            const tag = process.env.RELEASE_TAG;
+            try {
+              await github.rest.repos.getReleaseByTag({ ...repo, tag });
+              throw new Error('A release already exists for this tag; it will not be overwritten');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            let existingRef;
+            try {
+              const response = await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
+              existingRef = response.data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            if (existingRef) {
+              let object = existingRef.object;
+              while (object.type === 'tag') {
+                const { data: annotatedTag } = await github.rest.git.getTag({ ...repo, tag_sha: object.sha });
+                object = annotatedTag.object;
+              }
+              if (object.type !== 'commit' || object.sha !== run.head_sha) {
+                throw new Error('Existing tag points to a different commit than the APK build');
+              }
+            }
+            core.setOutput('commit', run.head_sha);
+            core.setOutput('artifact_id', String(matches[0].id));
+
+      - name: Download signed APK from source build
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.source.outputs.artifact_id }}
+          merge-multiple: true
+          path: release-apk
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Publish release with APK
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        with:
+          script: |
+            const fs = require('node:fs/promises');
+            const files = await fs.readdir('release-apk');
+            if (files.length !== 1 || files[0] !== 'app-release.apk') {
+              throw new Error('Artifact must contain only app-release.apk');
+            }
+            const apk = await fs.readFile('release-apk/app-release.apk');
+            if (!apk.length) throw new Error('APK is empty');
+            const { data: release } = await github.rest.repos.createRelease({
+              ...context.repo,
+              tag_name: process.env.RELEASE_TAG,
+              target_commitish: process.env.SOURCE_COMMIT,
+              name: process.env.RELEASE_TAG,
+              draft: true,
+              prerelease: process.env.PRERELEASE === 'true',
+              generate_release_notes: true,
+            });
+            await github.rest.repos.uploadReleaseAsset({
+              ...context.repo,
+              release_id: release.id,
+              name: 'brutusfly-release.apk',
+              data: apk,
+              headers: { 'content-type': 'application/vnd.android.package-archive' },
+            });
+            const { data: published } = await github.rest.repos.updateRelease({
+              ...context.repo, release_id: release.id, draft: false,
+            });
+            await core.summary.addLink('Published release', published.html_url).write();
