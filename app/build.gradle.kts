@@ -24,8 +24,32 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val signingEnvironment = listOf(
+        "ANDROID_KEYSTORE_PATH",
+        "ANDROID_KEYSTORE_PASSWORD",
+        "ANDROID_KEY_ALIAS",
+        "ANDROID_KEY_PASSWORD",
+    ).associateWith { providers.environmentVariable(it).orNull }
+    val hasReleaseSigning = signingEnvironment.values.any { it != null }
+    if (hasReleaseSigning) {
+        signingEnvironment.forEach { (name, value) ->
+            require(!value.isNullOrBlank()) { "Missing release signing environment variable: $name" }
+        }
+        signingConfigs {
+            create("release") {
+                storeFile = file(signingEnvironment.getValue("ANDROID_KEYSTORE_PATH")!!)
+                storePassword = signingEnvironment.getValue("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = signingEnvironment.getValue("ANDROID_KEY_ALIAS")
+                keyPassword = signingEnvironment.getValue("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
