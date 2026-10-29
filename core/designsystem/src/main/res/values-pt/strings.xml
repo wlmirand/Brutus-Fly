@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="brutus_search_placeholder">Buscar...</string>
+    <string name="brutus_search_clear">Limpar busca</string>
+    <string name="brutus_password_show">Mostrar token</string>
+    <string name="brutus_password_hide">Ocultar token</string>
+    <string name="brutus_loading">Carregando…</string>
+</resources>
