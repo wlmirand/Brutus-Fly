@@ -16,3 +16,6 @@ captures/
 .cxx/
 local.properties
 .ai/
+.env
+*.jks
+*.keystore

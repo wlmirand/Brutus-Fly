@@ -83,3 +83,11 @@ Feature implementation notes are available in [`docs/`](docs/).
 ## Feedback
 
 Bug reports and feature suggestions are welcome through GitHub Issues. Include reproduction steps and relevant device information, but remove tokens and sensitive financial data.
+
+## License
+
+Brutus Fly is licensed under the [Apache License, Version 2.0](LICENSE).
+
+Unless required by applicable law or agreed to in writing, the software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the [LICENSE](LICENSE) file for the specific language governing permissions and limitations.
+
+Third-party dependencies remain subject to their respective licenses.
